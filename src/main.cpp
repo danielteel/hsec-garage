@@ -32,7 +32,7 @@ void setup(){
 
 void loop(){
     if (!Messaging.connected()){
-        Messaging.connect("192.168.50.178", 7331);
+        Messaging.connect("192.168.50.178", 4004);
     }else{
         while (Messaging.available()){
             byte message;
@@ -46,25 +46,38 @@ void loop(){
                 Serial.println("Unknown command");
             }
         }
-    }
-    if (Client.connect("192.168.50.178", 3000)){
         CAMERA_CAPTURE capture;
         if (cameraCapture(capture)){
             // do stuff with capture.jpgBuff / jpgBuffLen
-            Client.println("POST / HTTP/1.0");
-            Client.println("Host: 192.168.50.178:3000");
-            Client.println("Content-Length: " + String(capture.jpgBuffLen));
-            Client.println("Content-Type: image/jpeg");
-            Client.println("Connection: close");
-            Client.println();
-            Client.write(capture.jpgBuff, capture.jpgBuffLen);
+            //Client.println("POST / HTTP/1.0");
+            //Client.println("Host: 192.168.50.178:3000");
+            Messaging.println(String(capture.jpgBuffLen));
+            Messaging.write(capture.jpgBuff, capture.jpgBuffLen);
             cameraCaptureCleanup(capture);
             Serial.println("captured ");
         }
         else{
             Serial.println("failed to capture ");
         }
-        Client.stop();
     }
-    delay(1000);
+    // if (Client.connect("192.168.50.178", 3000)){
+    //     CAMERA_CAPTURE capture;
+    //     if (cameraCapture(capture)){
+    //         // do stuff with capture.jpgBuff / jpgBuffLen
+    //         Client.println("POST / HTTP/1.0");
+    //         Client.println("Host: 192.168.50.178:3000");
+    //         Client.println("Content-Length: " + String(capture.jpgBuffLen));
+    //         Client.println("Content-Type: image/jpeg");
+    //         Client.println("Connection: close");
+    //         Client.println();
+    //         Client.write(capture.jpgBuff, capture.jpgBuffLen);
+    //         cameraCaptureCleanup(capture);
+    //         Serial.println("captured ");
+    //     }
+    //     else{
+    //         Serial.println("failed to capture ");
+    //     }
+    //     Client.stop();
+    // }
+    delay(2000);
 }
