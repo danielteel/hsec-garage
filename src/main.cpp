@@ -48,36 +48,19 @@ void loop(){
         }
         CAMERA_CAPTURE capture;
         if (cameraCapture(capture)){
-            // do stuff with capture.jpgBuff / jpgBuffLen
-            //Client.println("POST / HTTP/1.0");
-            //Client.println("Host: 192.168.50.178:3000");
-            Messaging.println(String(capture.jpgBuffLen));
+            Serial.println("captured ");
+            Messaging.write(73);
+            Messaging.write(31);
+            Messaging.write(1);
+            Messaging.write((capture.jpgBuffLen & 0xFF0000)>>16);
+            Messaging.write((capture.jpgBuffLen & 0xFF00)>>8);
+            Messaging.write( capture.jpgBuffLen & 0xFF);
             Messaging.write(capture.jpgBuff, capture.jpgBuffLen);
             cameraCaptureCleanup(capture);
-            Serial.println("captured ");
         }
         else{
             Serial.println("failed to capture ");
         }
     }
-    // if (Client.connect("192.168.50.178", 3000)){
-    //     CAMERA_CAPTURE capture;
-    //     if (cameraCapture(capture)){
-    //         // do stuff with capture.jpgBuff / jpgBuffLen
-    //         Client.println("POST / HTTP/1.0");
-    //         Client.println("Host: 192.168.50.178:3000");
-    //         Client.println("Content-Length: " + String(capture.jpgBuffLen));
-    //         Client.println("Content-Type: image/jpeg");
-    //         Client.println("Connection: close");
-    //         Client.println();
-    //         Client.write(capture.jpgBuff, capture.jpgBuffLen);
-    //         cameraCaptureCleanup(capture);
-    //         Serial.println("captured ");
-    //     }
-    //     else{
-    //         Serial.println("failed to capture ");
-    //     }
-    //     Client.stop();
-    // }
     delay(2000);
 }
