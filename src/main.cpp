@@ -38,7 +38,7 @@ void loop(){
         Messaging.connect("192.168.50.178", 4004);
         
         const char* stringToEncrypt = "Garage";
-        uint16_t encryptedLength;
+        uint32_t encryptedLength;
         uint8_t* encrypted=encrypt((const uint8_t*)stringToEncrypt, strlen(stringToEncrypt), encryptedLength, keyString);
         Messaging.write((unsigned char)73);
         Messaging.write((unsigned char)31);
@@ -63,20 +63,8 @@ void loop(){
         }
         CAMERA_CAPTURE capture;
         if (cameraCapture(capture)){
-            Serial.println("captured ");
-            // Messaging.write(73);
-            // Messaging.write(31);
-            // Messaging.write(1);
-            // Messaging.write((capture.jpgBuffLen & 0xFF0000)>>16);
-            // Messaging.write((capture.jpgBuffLen & 0xFF00)>>8);
-            // Messaging.write( capture.jpgBuffLen & 0xFF);
-            // Messaging.write(capture.jpgBuff, capture.jpgBuffLen);
-            // cameraCaptureCleanup(capture);
-
-
-            
-            const char* stringToEncrypt = "Garage";
-            uint16_t encryptedLength;
+            Serial.println("captured ");       
+            uint32_t encryptedLength;
             uint8_t* encrypted=encrypt((const uint8_t*)capture.jpgBuff, capture.jpgBuffLen, encryptedLength, keyString);
             Messaging.write((unsigned char)73);
             Messaging.write((unsigned char)31);

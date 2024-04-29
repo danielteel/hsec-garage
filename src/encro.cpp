@@ -26,27 +26,28 @@ uint8_t rightRotate8(uint8_t num, uint8_t places) {
     return (uint8_t)(temp & 0xFF);
 }
 
-uint8_t* frame(const uint8_t* data, uint16_t length, uint16_t& framedLength) {
+uint8_t* frame(const uint8_t* data, uint32_t length, uint32_t& framedLength) {
     uint8_t paddingLength = 4;
-    uint8_t modLength = (4 + 2 + length) % 16;
+    uint8_t modLength = (4 + 3 + length) % 16;
     if (modLength) {
         paddingLength = 16 - modLength % 16 + 4;
     }
-    framedLength = 2 + paddingLength + length;
+    framedLength = 3 + paddingLength + length;
     uint8_t* framed = new uint8_t[framedLength];
-    framed[0] = (length >> 8) & 0xFF;
-    framed[1] = length & 0xFF;
+    framed[0] = (length >> 16) & 0xFF;
+    framed[1] = (length >> 8) & 0xFF;
+    framed[2] = length & 0xFF;
 
     for (uint8_t i = 0; i < paddingLength; i++) {
-        framed[2 + i] = rand() % 256;
+        framed[3 + i] = rand() % 256;
     }
 
-    memmove(framed + 2 + paddingLength, data, sizeof(uint8_t) * length);
+    memmove(framed + 3 + paddingLength, data, sizeof(uint8_t) * length);
     return framed;
 }
 
-uint8_t* deframe(const uint8_t* data, uint16_t framedLength, uint16_t& dataLength) {
-    dataLength = data[0] << 8 | data[1];
+uint8_t* deframe(const uint8_t* data, uint32_t framedLength, uint32_t& dataLength) {
+    dataLength = (data[0] << 16) | (data[1] << 8) | data[2];
 
     uint8_t* deframed = new uint8_t[dataLength];
     memmove(deframed, data + (framedLength - dataLength), sizeof(uint8_t) * dataLength);
@@ -54,7 +55,7 @@ uint8_t* deframe(const uint8_t* data, uint16_t framedLength, uint16_t& dataLengt
 }
 
 
-uint8_t* encrypt(const uint8_t* data, uint16_t dataLength, uint16_t& encryptedLength, const char* keyString) {
+uint8_t* encrypt(const uint8_t* data, uint32_t dataLength, uint32_t& encryptedLength, const char* keyString) {
     uint8_t* buffer = frame(data, dataLength, encryptedLength);
 
     uint8_t key[32];
@@ -103,7 +104,7 @@ uint8_t* encrypt(const uint8_t* data, uint16_t dataLength, uint16_t& encryptedLe
 }
 
 
-uint8_t* decrypt(const uint8_t* data, uint16_t dataLength, uint16_t& decryptedLength, const char* keyString) {
+uint8_t* decrypt(const uint8_t* data, uint32_t dataLength, uint32_t& decryptedLength, const char* keyString) {
     uint8_t key[32];
     char tempHex[] = { 0,0,0 };
     for (uint8_t i = 0; i < 64; i += 2) {
