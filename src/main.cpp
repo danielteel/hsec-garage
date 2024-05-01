@@ -10,7 +10,10 @@ WiFiClient Messaging;
 
 const char* keyString = "4c97d02ae05b748dcb67234065ddf4b8f832a17826cf44a4f90a91349da78cba";
 
+uint32_t randomKey=0;
+
 void setup(){
+    
     Serial.begin(115200);
     Serial.println("Initializing...");
 
@@ -24,6 +27,8 @@ void setup(){
     wifiManager.setConnectTimeout(60);
     wifiManager.autoConnect("HSEC Dev Setup", "powerboner69");
 
+    randomKey=esp_random();
+
     Serial.println("Auto connect returned...");
     cameraSetup();
     Serial.println("camera setup...");
@@ -31,6 +36,10 @@ void setup(){
     delay(2000);
     pinMode(14, OUTPUT);
     digitalWrite(14, LOW);
+}
+
+void sendPacket(const uint8_t* data, uint32_t dataLength){
+
 }
 
 void loop(){
