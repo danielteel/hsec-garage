@@ -19,8 +19,8 @@ void initConfig(camera_config_t& c){
     c.pin_pclk = PCLK_GPIO_NUM;
     c.pin_vsync = VSYNC_GPIO_NUM;
     c.pin_href = HREF_GPIO_NUM;
-    c.pin_sscb_sda = SIOD_GPIO_NUM;
-    c.pin_sscb_scl = SIOC_GPIO_NUM;
+    c.pin_sccb_sda = SIOD_GPIO_NUM;
+    c.pin_sccb_scl = SIOC_GPIO_NUM;
     c.pin_pwdn = PWDN_GPIO_NUM;
     c.pin_reset = RESET_GPIO_NUM;
     c.xclk_freq_hz = 20000000;

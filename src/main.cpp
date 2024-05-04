@@ -10,7 +10,8 @@ WiFiClient Messaging;
 
 const char* keyString = "4c97d02ae05b748dcb67234065ddf4b8f832a17826cf44a4f90a91349da78cba";
 
-uint32_t randomKey=0;
+uint32_t handshakeNumber=0;
+uint32_t serverHandshakeNumber=0;
 
 void setup(){
     
@@ -27,7 +28,7 @@ void setup(){
     wifiManager.setConnectTimeout(60);
     wifiManager.autoConnect("HSEC Dev Setup", "powerboner69");
 
-    randomKey=esp_random();
+    handshakeNumber=esp_random();
 
     Serial.println("Auto connect returned...");
     cameraSetup();
@@ -38,25 +39,54 @@ void setup(){
     digitalWrite(14, LOW);
 }
 
-void sendPacket(const uint8_t* data, uint32_t dataLength){
+void sendInitialHandshake(){
+    Messaging.write((unsigned char)73);
+    Messaging.write((unsigned char)31);
+    Messaging.write((unsigned char)0);
+    uint32_t encryptedLength;
+    uint8_t handshakeBytes[4];
+    handshakeBytes[0]=(handshakeNumber>>24) & 0xFF;
+    handshakeBytes[1]=(handshakeNumber>>16) & 0xFF;
+    handshakeBytes[2]=(handshakeNumber>>8) & 0xFF;
+    handshakeBytes[3]=handshakeNumber & 0xFF;
+    uint8_t* encrypted=encrypt((const uint8_t*)&handshakeBytes, 4, encryptedLength, keyString);
+    Messaging.write((unsigned char)(encryptedLength>>16) & 0xFF);
+    Messaging.write((unsigned char)(encryptedLength>>8) & 0xFF);
+    Messaging.write((unsigned char)encryptedLength & 0xFF);
+    Messaging.write(encrypted, encryptedLength);
+}
 
+void sendPacket(uint8_t type, const void* data, uint32_t dataLength){
+    uint8_t* buffer = new uint8_t[dataLength+4];
+    uint8_t handshakeBytes[4];
+    handshakeBytes[0]=(handshakeNumber>>24) & 0xFF;
+    handshakeBytes[1]=(handshakeNumber>>16) & 0xFF;
+    handshakeBytes[2]=(handshakeNumber>>8) & 0xFF;
+    handshakeBytes[3]=handshakeNumber & 0xFF;
+    memmove(buffer, (const uint8_t*)&handshakeBytes, 4);
+    memmove(buffer+4, data, dataLength);
+
+    uint32_t encryptedLength;
+    uint8_t* encrypted=encrypt((const uint8_t*)buffer, dataLength+4, encryptedLength, keyString);
+    Messaging.write((uint8_t)73);
+    Messaging.write((uint8_t)31);
+    Messaging.write(type);
+    Messaging.write((uint8_t)(encryptedLength>>16) & 0xFF);
+    Messaging.write((uint8_t)(encryptedLength>>8) & 0xFF);
+    Messaging.write((uint8_t)encryptedLength & 0xFF);
+    Messaging.write(encrypted, encryptedLength);
+
+    delete[] encrypted;
+    delete[] buffer;
+
+    handshakeNumber++;
 }
 
 void loop(){
     if (!Messaging.connected()){
         Messaging.connect("192.168.50.178", 4004);
-        
-        const char* stringToEncrypt = "Garage";
-        uint32_t encryptedLength;
-        uint8_t* encrypted=encrypt((const uint8_t*)stringToEncrypt, strlen(stringToEncrypt), encryptedLength, keyString);
-        Messaging.write((unsigned char)73);
-        Messaging.write((unsigned char)31);
-        Messaging.write((unsigned char)0);
-        Messaging.write((unsigned char)(encryptedLength>>16) & 0xFF);
-        Messaging.write((unsigned char)(encryptedLength>>8) & 0xFF);
-        Messaging.write((unsigned char)encryptedLength & 0xFF);
-        Messaging.write(encrypted, encryptedLength);
-        delete[] encrypted;
+        sendInitialHandshake();
+        sendPacket(1, "Garage", 6);
     }else{
         while (Messaging.available()){
             byte message;
@@ -72,22 +102,13 @@ void loop(){
         }
         CAMERA_CAPTURE capture;
         if (cameraCapture(capture)){
-            Serial.println("captured ");       
-            uint32_t encryptedLength;
-            uint8_t* encrypted=encrypt((const uint8_t*)capture.jpgBuff, capture.jpgBuffLen, encryptedLength, keyString);
-            Messaging.write((unsigned char)73);
-            Messaging.write((unsigned char)31);
-            Messaging.write((unsigned char)1);
-            Messaging.write((unsigned char)(encryptedLength>>16) & 0xFF);
-            Messaging.write((unsigned char)(encryptedLength>>8) & 0xFF);
-            Messaging.write((unsigned char)encryptedLength & 0xFF);
-            Messaging.write(encrypted, encryptedLength);
-            delete[] encrypted;
+            Serial.println("captured ");   
+            sendPacket(2, capture.jpgBuff, capture.jpgBuffLen);
             cameraCaptureCleanup(capture);
         }
         else{
             Serial.println("failed to capture ");
         }
     }
-    delay(250);
+    delay(2000);
 }
