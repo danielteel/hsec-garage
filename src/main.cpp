@@ -82,6 +82,30 @@ void sendPacket(uint8_t type, const void* data, uint32_t dataLength){
     handshakeNumber++;
 }
 
+typedef enum {
+    MAGIC1,
+    MAGIC2,
+    TYPE,
+    LENHI,
+    LENMID,
+    LENLO,
+    PAYLOAD
+} PACKETWRITESTATE;
+
+PACKETWRITESTATE packetState=PACKETWRITESTATE::MAGIC1;
+
+uint8_t packetType=0;
+uint8_t packetLengthHi=0;
+uint8_t packetLengthMid=0;
+uint8_t packetLengthLo=0;
+uint8_t* packetPayload = nullptr;
+uint32_t packetPayloadWriteIndex = 0;
+
+
+void dataRecieved(uint8_t byte){
+
+}
+
 void loop(){
     if (!Messaging.connected()){
         Messaging.connect("192.168.50.178", 4004);
@@ -102,7 +126,7 @@ void loop(){
         }
         CAMERA_CAPTURE capture;
         if (cameraCapture(capture)){
-            Serial.println("captured ");   
+            Serial.println("captured ");
             sendPacket(2, capture.jpgBuff, capture.jpgBuffLen);
             cameraCaptureCleanup(capture);
         }
