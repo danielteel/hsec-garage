@@ -39,6 +39,14 @@ void setup(){
     digitalWrite(14, LOW);
 }
 
+void onPacket(uint8_t type, uint8_t* data, uint32_t dataLength){
+    if (type==3){
+        digitalWrite(14, HIGH);
+        delay(250);
+        digitalWrite(14, LOW);
+    }
+}
+
 void sendInitialHandshake(){
     Messaging.write((unsigned char)73);
     Messaging.write((unsigned char)31);
@@ -95,18 +103,121 @@ typedef enum {
 PACKETWRITESTATE packetState=PACKETWRITESTATE::MAGIC1;
 
 uint8_t packetType=0;
-uint8_t packetLengthHi=0;
-uint8_t packetLengthMid=0;
-uint8_t packetLengthLo=0;
+uint32_t packetLength=0;
 uint8_t* packetPayload = nullptr;
 uint32_t packetPayloadWriteIndex = 0;
+bool haveRecievedServerHandshakeNumber=false;
 
+
+void onError(const char* errorMsg){
+    if (errorMsg){
+        Serial.print("Error: ");
+        Serial.println(errorMsg);
+    }else{
+        Serial.println("Error occured");
+    }
+    Messaging.stop();
+    if (packetPayload){
+        delete[] packetPayload;
+        packetPayload=nullptr;
+    }
+    packetState=PACKETWRITESTATE::MAGIC1;
+    packetType=0;
+    packetLength=0;
+    packetPayloadWriteIndex=0;
+    haveRecievedServerHandshakeNumber=false;
+    serverHandshakeNumber=0;
+}
 
 void dataRecieved(uint8_t byte){
+    switch (packetState){
+        case PACKETWRITESTATE::MAGIC1:
+            if (byte!=73){
+                onError("magic1 byte is incorrect");
+                return;
+            }
+            packetState=PACKETWRITESTATE::MAGIC2;
+            break;
+        case PACKETWRITESTATE::MAGIC2:
+            if (byte!=31){
+                onError("magic2 byte is incorrect");
+                return;
+            }
+            packetState=PACKETWRITESTATE::TYPE;
+            break;
+        case PACKETWRITESTATE::TYPE:
+            if (!haveRecievedServerHandshakeNumber && byte!=0){
+                onError("first packet needs to be initial handshake packet");
+                return;
+            }
+            packetType=byte;
+            packetState=PACKETWRITESTATE::LENHI;
+            break;
+        case PACKETWRITESTATE::LENHI:
+            packetLength=(uint32_t)byte<<16;
+            packetState=PACKETWRITESTATE::LENMID;
+            break;
+        case PACKETWRITESTATE::LENMID:
+            packetLength|=(uint32_t)byte<<8;
+            packetState=PACKETWRITESTATE::LENLO;
+            break;
+        case PACKETWRITESTATE::LENLO:
+            packetLength|=byte;
+            if (packetPayload){
+                delete[] packetPayload;
+                packetPayload=nullptr;
+            }
+            packetPayload=new uint8_t[packetLength];//need to clean this up on an error
+            packetState=PACKETWRITESTATE::PAYLOAD;
+            break;
+        case PACKETWRITESTATE::PAYLOAD:
+            packetPayload[packetPayloadWriteIndex]=byte;
+            packetPayloadWriteIndex++;
+            if (packetPayloadWriteIndex>=packetLength){
+                uint32_t decryptedLength;
+                uint8_t* decrypted = decrypt(packetPayload, packetLength, decryptedLength, keyString);
+                delete[] packetPayload;
+                packetPayload=nullptr;
+                if (packetType==0){
+                    if (haveRecievedServerHandshakeNumber){
+                        //Error, we already recieved the handshake number, this can only happen at the beginning of each connection
+                        onError("handshake packet was already recieved");
+                        delete[] decrypted;
+                        return;
+                    }else{
+                        if (decryptedLength!=4){
+                            //Error, handshake packet needs to be 4 bytes
+                            onError("initial recieved handshake packet needs to be 4 bytes long");
+                            delete[] decrypted;
+                            return;
+                        }else{
+                            serverHandshakeNumber=(decrypted[0]<<24) | (decrypted[1]<<16) | (decrypted[2]<<8) | decrypted[3];
+                            haveRecievedServerHandshakeNumber=true;
+                        }
+                    }
 
+                }else{
+                    //Send off decrypted packet for processing
+                    uint32_t recvdServerHandshakeNumber=(decrypted[0]<<24) | (decrypted[1]<<16) | (decrypted[2]<<8) | decrypted[3];
+                    if (recvdServerHandshakeNumber==serverHandshakeNumber){
+                        serverHandshakeNumber++;
+                        onPacket(packetType, decrypted+4, decryptedLength-4);
+                    }else{
+                        onError("incorrect handshake number recieved");
+                        delete[] decrypted;
+                        return;
+                    }
+                }
+                delete[] decrypted;
+                packetState=PACKETWRITESTATE::MAGIC1;
+            }
+            break;
+    }
 }
 
 void loop(){
+    static uint32_t lastCaptureTime=0;
+
     if (!Messaging.connected()){
         Messaging.connect("192.168.50.178", 4004);
         sendInitialHandshake();
@@ -115,24 +226,20 @@ void loop(){
         while (Messaging.available()){
             byte message;
             Messaging.readBytes(&message, 1);
-            if (message=='1'){
-                digitalWrite(14, HIGH);
-                delay(1000);
-                digitalWrite(14, LOW);
-                Serial.println("Garage button pressed");
-            }else{
-                Serial.println("Unknown command");
+            dataRecieved(message);
+        }
+
+        uint32_t currentTime = millis();
+        if ((currentTime-lastCaptureTime)>=2000 || currentTime<lastCaptureTime){
+            CAMERA_CAPTURE capture;
+            if (cameraCapture(capture)){
+                sendPacket(2, capture.jpgBuff, capture.jpgBuffLen);
+                cameraCaptureCleanup(capture);
             }
-        }
-        CAMERA_CAPTURE capture;
-        if (cameraCapture(capture)){
-            Serial.println("captured ");
-            sendPacket(2, capture.jpgBuff, capture.jpgBuffLen);
-            cameraCaptureCleanup(capture);
-        }
-        else{
-            Serial.println("failed to capture ");
+            else{
+                Serial.println("failed to capture ");
+            }
+            lastCaptureTime=currentTime;
         }
     }
-    delay(2000);
 }
