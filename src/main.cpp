@@ -13,8 +13,8 @@ const char* keyString = "4c97d02ae05b748dcb67234065ddf4b8f832a17826cf44a4f90a913
 uint32_t handshakeNumber=0;
 uint32_t serverHandshakeNumber=0;
 
+
 void setup(){
-    
     Serial.begin(115200);
     Serial.println("Initializing...");
 
@@ -41,6 +41,7 @@ void setup(){
 
 void onPacket(uint8_t type, uint8_t* data, uint32_t dataLength){
     if (type==3){
+        Serial.println("recieved garage door press command");
         digitalWrite(14, HIGH);
         delay(250);
         digitalWrite(14, LOW);
@@ -169,46 +170,55 @@ void dataRecieved(uint8_t byte){
             }
             packetPayload=new uint8_t[packetLength];//need to clean this up on an error
             packetState=PACKETWRITESTATE::PAYLOAD;
+            packetPayloadWriteIndex=0;
             break;
         case PACKETWRITESTATE::PAYLOAD:
+
             packetPayload[packetPayloadWriteIndex]=byte;
+
             packetPayloadWriteIndex++;
+
             if (packetPayloadWriteIndex>=packetLength){
                 uint32_t decryptedLength;
                 uint8_t* decrypted = decrypt(packetPayload, packetLength, decryptedLength, keyString);
-                delete[] packetPayload;
-                packetPayload=nullptr;
-                if (packetType==0){
-                    if (haveRecievedServerHandshakeNumber){
-                        //Error, we already recieved the handshake number, this can only happen at the beginning of each connection
-                        onError("handshake packet was already recieved");
-                        delete[] decrypted;
-                        return;
-                    }else{
-                        if (decryptedLength!=4){
-                            //Error, handshake packet needs to be 4 bytes
-                            onError("initial recieved handshake packet needs to be 4 bytes long");
+                if (decrypted){
+                    delete[] packetPayload;
+                    packetPayload=nullptr;
+                    if (packetType==0){
+                        if (haveRecievedServerHandshakeNumber){
+                            //Error, we already recieved the handshake number, this can only happen at the beginning of each connection
+                            onError("handshake packet was already recieved");
                             delete[] decrypted;
                             return;
                         }else{
-                            serverHandshakeNumber=(decrypted[0]<<24) | (decrypted[1]<<16) | (decrypted[2]<<8) | decrypted[3];
-                            haveRecievedServerHandshakeNumber=true;
+                            if (decryptedLength!=4){
+                                //Error, handshake packet needs to be 4 bytes
+                                onError("initial recieved handshake packet needs to be 4 bytes long");
+                                delete[] decrypted;
+                                return;
+                            }else{
+                                serverHandshakeNumber=(decrypted[0]<<24) | (decrypted[1]<<16) | (decrypted[2]<<8) | decrypted[3];
+                                haveRecievedServerHandshakeNumber=true;
+                            }
+                        }
+
+                    }else{
+                        //Send off decrypted packet for processing
+                        uint32_t recvdServerHandshakeNumber=(decrypted[0]<<24) | (decrypted[1]<<16) | (decrypted[2]<<8) | decrypted[3];
+                        if (recvdServerHandshakeNumber==serverHandshakeNumber){
+                            serverHandshakeNumber++;
+                            onPacket(packetType, decrypted+4, decryptedLength-4);
+                        }else{
+                            onError("incorrect handshake number recieved");
+                            Serial.printf("Recvd: %u  Expected: %u\n", recvdServerHandshakeNumber, serverHandshakeNumber);
+                            delete[] decrypted;
+                            return;
                         }
                     }
-
+                    delete[] decrypted;
                 }else{
-                    //Send off decrypted packet for processing
-                    uint32_t recvdServerHandshakeNumber=(decrypted[0]<<24) | (decrypted[1]<<16) | (decrypted[2]<<8) | decrypted[3];
-                    if (recvdServerHandshakeNumber==serverHandshakeNumber){
-                        serverHandshakeNumber++;
-                        onPacket(packetType, decrypted+4, decryptedLength-4);
-                    }else{
-                        onError("incorrect handshake number recieved");
-                        delete[] decrypted;
-                        return;
-                    }
+                    Serial.println("failed to decrypt packet");
                 }
-                delete[] decrypted;
                 packetState=PACKETWRITESTATE::MAGIC1;
             }
             break;
@@ -217,11 +227,20 @@ void dataRecieved(uint8_t byte){
 
 void loop(){
     static uint32_t lastCaptureTime=0;
+    static uint32_t lastConnectAttemptTime=0;
 
-    if (!Messaging.connected()){
-        Messaging.connect("192.168.50.178", 4004);
-        sendInitialHandshake();
-        sendPacket(1, "Garage", 6);
+    uint32_t currentTime = millis();
+
+    if (!Messaging.connected() && ((currentTime-lastConnectAttemptTime)>=2000 || currentTime<lastConnectAttemptTime)){ 
+        lastConnectAttemptTime=currentTime;
+        if (packetPayload){
+            delete[] packetPayload;
+            packetPayload=nullptr;
+        }
+        if (Messaging.connect("192.168.50.178", 4004)){
+            sendInitialHandshake();
+            sendPacket(1, "Garage", 6);
+        }
     }else{
         while (Messaging.available()){
             byte message;
@@ -229,14 +248,12 @@ void loop(){
             dataRecieved(message);
         }
 
-        uint32_t currentTime = millis();
         if ((currentTime-lastCaptureTime)>=2000 || currentTime<lastCaptureTime){
             CAMERA_CAPTURE capture;
             if (cameraCapture(capture)){
                 sendPacket(2, capture.jpgBuff, capture.jpgBuffLen);
                 cameraCaptureCleanup(capture);
-            }
-            else{
+            }else{
                 Serial.println("failed to capture ");
             }
             lastCaptureTime=currentTime;

@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <time.h>  
 #include <cstring>
+#include <Arduino.h>
 
 
 uint32_t leftRotate32(uint32_t num, uint8_t places) {
@@ -47,8 +48,7 @@ uint8_t* frame(const uint8_t* data, uint32_t length, uint32_t& framedLength) {
 }
 
 uint8_t* deframe(const uint8_t* data, uint32_t framedLength, uint32_t& dataLength) {
-    dataLength = (data[0] << 16) | (data[1] << 8) | data[2];
-
+    dataLength = ((uint32_t)data[0] << 16) | ((uint32_t)data[1] << 8) | data[2];
     uint8_t* deframed = new uint8_t[dataLength];
     memmove(deframed, data + (framedLength - dataLength), sizeof(uint8_t) * dataLength);
     return deframed;
@@ -151,7 +151,6 @@ uint8_t* decrypt(const uint8_t* data, uint32_t dataLength, uint32_t& decryptedLe
     }
 
     uint8_t* decrypted = deframe(buffer, dataLength, decryptedLength);
-
     delete[] buffer;
     return decrypted;
 }
