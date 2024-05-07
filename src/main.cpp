@@ -13,6 +13,7 @@ const char* keyString = "4c97d02ae05b748dcb67234065ddf4b8f832a17826cf44a4f90a913
 uint32_t handshakeNumber=0;
 uint32_t serverHandshakeNumber=0;
 
+const uint8_t packetMagicBytes[]={73, 31};
 
 void setup(){
     Serial.begin(115200);
@@ -49,55 +50,31 @@ void onPacket(uint8_t type, uint8_t* data, uint32_t dataLength){
 }
 
 void sendInitialHandshake(){
-    Messaging.write((unsigned char)73);
-    Messaging.write((unsigned char)31);
-    Messaging.write((unsigned char)0);
     uint32_t encryptedLength;
-    uint8_t handshakeBytes[4];
-    handshakeBytes[0]=(handshakeNumber>>24) & 0xFF;
-    handshakeBytes[1]=(handshakeNumber>>16) & 0xFF;
-    handshakeBytes[2]=(handshakeNumber>>8) & 0xFF;
-    handshakeBytes[3]=handshakeNumber & 0xFF;
-    uint8_t* encrypted=encrypt((const uint8_t*)&handshakeBytes, 4, encryptedLength, keyString);
-    Messaging.write((unsigned char)(encryptedLength>>16) & 0xFF);
-    Messaging.write((unsigned char)(encryptedLength>>8) & 0xFF);
-    Messaging.write((unsigned char)encryptedLength & 0xFF);
+    const uint8_t handshakeMessage=0;
+    uint8_t* encrypted=encrypt(handshakeNumber, &handshakeMessage, 1, encryptedLength, keyString);
+    Messaging.write(packetMagicBytes, 2);
+    Messaging.write((uint8_t*)&encryptedLength, 4);
     Messaging.write(encrypted, encryptedLength);
 }
 
 void sendPacket(uint8_t type, const void* data, uint32_t dataLength){
-    uint8_t* buffer = new uint8_t[dataLength+4];
-    uint8_t handshakeBytes[4];
-    handshakeBytes[0]=(handshakeNumber>>24) & 0xFF;
-    handshakeBytes[1]=(handshakeNumber>>16) & 0xFF;
-    handshakeBytes[2]=(handshakeNumber>>8) & 0xFF;
-    handshakeBytes[3]=handshakeNumber & 0xFF;
-    memmove(buffer, (const uint8_t*)&handshakeBytes, 4);
-    memmove(buffer+4, data, dataLength);
-
     uint32_t encryptedLength;
-    uint8_t* encrypted=encrypt((const uint8_t*)buffer, dataLength+4, encryptedLength, keyString);
-    Messaging.write((uint8_t)73);
-    Messaging.write((uint8_t)31);
-    Messaging.write(type);
-    Messaging.write((uint8_t)(encryptedLength>>16) & 0xFF);
-    Messaging.write((uint8_t)(encryptedLength>>8) & 0xFF);
-    Messaging.write((uint8_t)encryptedLength & 0xFF);
+    uint8_t* encrypted=encrypt(handshakeNumber, (const uint8_t*)data, dataLength, encryptedLength, keyString);
+    Messaging.write(packetMagicBytes, 2);
+    Messaging.write((uint8_t*)&encryptedLength, 4);
     Messaging.write(encrypted, encryptedLength);
-
     delete[] encrypted;
-    delete[] buffer;
-
     handshakeNumber++;
 }
 
 typedef enum {
     MAGIC1,
     MAGIC2,
-    TYPE,
-    LENHI,
-    LENMID,
-    LENLO,
+    LEN1,
+    LEN2,
+    LEN3,
+    LEN4,
     PAYLOAD
 } PACKETWRITESTATE;
 
@@ -133,37 +110,33 @@ void onError(const char* errorMsg){
 void dataRecieved(uint8_t byte){
     switch (packetState){
         case PACKETWRITESTATE::MAGIC1:
-            if (byte!=73){
+            if (byte!=packetMagicBytes[0]){
                 onError("magic1 byte is incorrect");
                 return;
             }
             packetState=PACKETWRITESTATE::MAGIC2;
             break;
         case PACKETWRITESTATE::MAGIC2:
-            if (byte!=31){
+            if (byte!=packetMagicBytes[1]){
                 onError("magic2 byte is incorrect");
                 return;
             }
-            packetState=PACKETWRITESTATE::TYPE;
+            packetState=PACKETWRITESTATE::LEN1;
             break;
-        case PACKETWRITESTATE::TYPE:
-            if (!haveRecievedServerHandshakeNumber && byte!=0){
-                onError("first packet needs to be initial handshake packet");
-                return;
-            }
-            packetType=byte;
-            packetState=PACKETWRITESTATE::LENHI;
+        case PACKETWRITESTATE::LEN1:
+            memmove(((uint8_t*)&packetLength)+0, &byte, 1);
+            packetState=PACKETWRITESTATE::LEN2;
             break;
-        case PACKETWRITESTATE::LENHI:
-            packetLength=(uint32_t)byte<<16;
-            packetState=PACKETWRITESTATE::LENMID;
+        case PACKETWRITESTATE::LEN2:
+            memmove(((uint8_t*)&packetLength)+1, &byte, 1);
+            packetState=PACKETWRITESTATE::LEN3;
             break;
-        case PACKETWRITESTATE::LENMID:
-            packetLength|=(uint32_t)byte<<8;
-            packetState=PACKETWRITESTATE::LENLO;
+        case PACKETWRITESTATE::LEN3:
+            memmove(((uint8_t*)&packetLength)+2, &byte, 1);
+            packetState=PACKETWRITESTATE::LEN4;
             break;
-        case PACKETWRITESTATE::LENLO:
-            packetLength|=byte;
+        case PACKETWRITESTATE::LEN4:
+            memmove(((uint8_t*)&packetLength)+3, &byte, 1);
             if (packetPayload){
                 delete[] packetPayload;
                 packetPayload=nullptr;
@@ -180,41 +153,28 @@ void dataRecieved(uint8_t byte){
 
             if (packetPayloadWriteIndex>=packetLength){
                 uint32_t decryptedLength;
-                uint8_t* decrypted = decrypt(packetPayload, packetLength, decryptedLength, keyString);
+                uint32_t recvdServerHandshakeNumber;
+                uint8_t* decrypted = decrypt(recvdServerHandshakeNumber, packetPayload, packetLength, decryptedLength, keyString);
                 if (decrypted){
                     delete[] packetPayload;
                     packetPayload=nullptr;
-                    if (packetType==0){
-                        if (haveRecievedServerHandshakeNumber){
-                            //Error, we already recieved the handshake number, this can only happen at the beginning of each connection
-                            onError("handshake packet was already recieved");
-                            delete[] decrypted;
-                            return;
-                        }else{
-                            if (decryptedLength!=4){
-                                //Error, handshake packet needs to be 4 bytes
-                                onError("initial recieved handshake packet needs to be 4 bytes long");
-                                delete[] decrypted;
-                                return;
-                            }else{
-                                serverHandshakeNumber=(decrypted[0]<<24) | (decrypted[1]<<16) | (decrypted[2]<<8) | decrypted[3];
-                                haveRecievedServerHandshakeNumber=true;
-                            }
-                        }
 
-                    }else{
-                        //Send off decrypted packet for processing
-                        uint32_t recvdServerHandshakeNumber=(decrypted[0]<<24) | (decrypted[1]<<16) | (decrypted[2]<<8) | decrypted[3];
-                        if (recvdServerHandshakeNumber==serverHandshakeNumber){
-                            serverHandshakeNumber++;
-                            onPacket(packetType, decrypted+4, decryptedLength-4);
-                        }else{
-                            onError("incorrect handshake number recieved");
-                            Serial.printf("Recvd: %u  Expected: %u\n", recvdServerHandshakeNumber, serverHandshakeNumber);
-                            delete[] decrypted;
-                            return;
-                        }
+                    if (!haveRecievedServerHandshakeNumber){
+                        serverHandshakeNumber=recvdServerHandshakeNumber;
+                        haveRecievedServerHandshakeNumber=true;
                     }
+
+                    //Send off decrypted packet for processing
+                    if (recvdServerHandshakeNumber==serverHandshakeNumber){
+                        serverHandshakeNumber++;
+                        onPacket(packetType, decrypted, decryptedLength);
+                    }else{
+                        onError("incorrect handshake number recieved");
+                        Serial.printf("Recvd: %u  Expected: %u\n", recvdServerHandshakeNumber, serverHandshakeNumber);
+                        delete[] decrypted;
+                        return;
+                    }
+                    
                     delete[] decrypted;
                 }else{
                     Serial.println("failed to decrypt packet");
