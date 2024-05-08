@@ -35,9 +35,33 @@ void setup(){
     cameraSetup();
     Serial.println("camera setup...");
 
-    delay(2000);
+    delay(500);
     pinMode(14, OUTPUT);
     digitalWrite(14, LOW);
+
+    uint32_t encryptedLength;
+    uint8_t* encrypted=encrypt(handshakeNumber, nullptr, 0, encryptedLength, keyString);
+    if (encrypted){
+        uint32_t decryptedHandshake;
+        uint32_t decryptedLength;
+        uint8_t* decrypted=decrypt(decryptedHandshake, encrypted, encryptedLength, decryptedLength, keyString);
+        delete[] encrypted;
+        
+        if (decryptedHandshake==handshakeNumber && decryptedLength==0){
+            Serial.println("Everything looks good");
+        }else{
+            if (decryptedHandshake!=handshakeNumber){
+                Serial.println("Handshakes bad");
+            }
+            if (decryptedLength!=0){
+                Serial.println("decrypted length bad");
+            }
+        }
+            
+        if (decrypted) delete[] decrypted;
+    }else{
+        Serial.println("failed to encrypt");
+    }
 }
 
 void onPacket(uint8_t type, uint8_t* data, uint32_t dataLength){
@@ -52,20 +76,29 @@ void onPacket(uint8_t type, uint8_t* data, uint32_t dataLength){
 void sendInitialHandshake(){
     uint32_t encryptedLength;
     const uint8_t handshakeMessage=0;
-    uint8_t* encrypted=encrypt(handshakeNumber, &handshakeMessage, 1, encryptedLength, keyString);
-    Messaging.write(packetMagicBytes, 2);
-    Messaging.write((uint8_t*)&encryptedLength, 4);
-    Messaging.write(encrypted, encryptedLength);
+    uint8_t* encrypted=encrypt(handshakeNumber, &handshakeMessage, 0, encryptedLength, keyString);
+    if (encrypted){
+        Messaging.write(packetMagicBytes, 2);
+        Messaging.write((uint8_t*)&encryptedLength, 4);
+        Messaging.write(encrypted, encryptedLength);
+        delete[] encrypted;
+    }else{
+        Serial.println("failed to encrypt in sendInitialHandshake()");
+    }
 }
 
-void sendPacket(uint8_t type, const void* data, uint32_t dataLength){
+void sendPacket(const void* data, uint32_t dataLength){
     uint32_t encryptedLength;
     uint8_t* encrypted=encrypt(handshakeNumber, (const uint8_t*)data, dataLength, encryptedLength, keyString);
-    Messaging.write(packetMagicBytes, 2);
-    Messaging.write((uint8_t*)&encryptedLength, 4);
-    Messaging.write(encrypted, encryptedLength);
-    delete[] encrypted;
-    handshakeNumber++;
+    if (encrypted){
+        Messaging.write(packetMagicBytes, 2);
+        Messaging.write((uint8_t*)&encryptedLength, 4);
+        Messaging.write(encrypted, encryptedLength);
+        delete[] encrypted;
+        handshakeNumber++;
+    }else{
+        Serial.println("failed to encrypt in sendPacket()");
+    }
 }
 
 typedef enum {
@@ -155,10 +188,9 @@ void dataRecieved(uint8_t byte){
                 uint32_t decryptedLength;
                 uint32_t recvdServerHandshakeNumber;
                 uint8_t* decrypted = decrypt(recvdServerHandshakeNumber, packetPayload, packetLength, decryptedLength, keyString);
+                delete[] packetPayload;
+                packetPayload=nullptr;
                 if (decrypted){
-                    delete[] packetPayload;
-                    packetPayload=nullptr;
-
                     if (!haveRecievedServerHandshakeNumber){
                         serverHandshakeNumber=recvdServerHandshakeNumber;
                         haveRecievedServerHandshakeNumber=true;
@@ -199,10 +231,10 @@ void loop(){
         }
         if (Messaging.connect("192.168.50.178", 4004)){
             sendInitialHandshake();
-            sendPacket(1, "Garage", 6);
+            sendPacket("Garage", 6);
         }
-    }else{
-        while (Messaging.available()){
+    }else if (Messaging.connected()){
+        while (Messaging.connected() && Messaging.available()){
             byte message;
             Messaging.readBytes(&message, 1);
             dataRecieved(message);
@@ -211,7 +243,7 @@ void loop(){
         if ((currentTime-lastCaptureTime)>=2000 || currentTime<lastCaptureTime){
             CAMERA_CAPTURE capture;
             if (cameraCapture(capture)){
-                sendPacket(2, capture.jpgBuff, capture.jpgBuffLen);
+                if (Messaging.connected()) sendPacket(capture.jpgBuff, capture.jpgBuffLen);
                 cameraCaptureCleanup(capture);
             }else{
                 Serial.println("failed to capture ");

@@ -28,6 +28,9 @@ uint8_t rightRotate8(uint8_t num, uint8_t places) {
 }
 
 uint8_t* frame(uint32_t handshake, const uint8_t* data, uint32_t length, uint32_t& framedLength) {
+    if (!data && length){
+        return nullptr;
+    }
     uint8_t paddingLength = 4;
     const uint8_t handshakeLength=4;
     const uint8_t sizeLength=4;
@@ -38,18 +41,25 @@ uint8_t* frame(uint32_t handshake, const uint8_t* data, uint32_t length, uint32_
     framedLength = sizeLength + handshakeLength + paddingLength + length;
     uint8_t* framed = new uint8_t[framedLength];
     esp_fill_random(framed+sizeLength, paddingLength);
-    memmove(framed, &length, 4);
+    *((uint32_t*)framed) = length+4;
     memmove(framed+sizeLength+paddingLength, &handshake, handshakeLength);
-    memmove(framed+sizeLength+paddingLength+handshakeLength, data, length);
+    if (data && length) memmove(framed+sizeLength+paddingLength+handshakeLength, data, length);
     return framed;
 }
 
 uint8_t* deframe(const uint8_t* data, uint32_t framedLength, uint32_t& dataLength, uint32_t& handshake) {
-    dataLength = *((uint32_t*)data)-4;
-    uint8_t* deframed = new uint8_t[dataLength];
-    handshake=*((uint32_t*)(data+4));
-    memmove(deframed, data + (framedLength - dataLength)+4, dataLength);
-    return deframed;
+    dataLength = (*((uint32_t*)data))-4;
+    if (dataLength>=framedLength){
+        //Serial.println("Bad data length");
+        return nullptr;
+    }
+    handshake=*((uint32_t*)(data+(framedLength - dataLength)-4));
+    if (dataLength){
+        uint8_t* deframed = new uint8_t[dataLength];
+        memmove(deframed, data + (framedLength - dataLength), dataLength);
+        return deframed;
+    }
+    return nullptr;
 }
 
 
@@ -113,10 +123,8 @@ uint8_t* decrypt(uint32_t& handshake, const uint8_t* data, uint32_t dataLength, 
         tempHex[1] = keyString[i + 1];
         key[i >> 1] = strtoul(tempHex, nullptr, 16);
     }
-
     uint8_t* buffer = new uint8_t[dataLength];
-    memmove(buffer, data, sizeof(uint8_t) * dataLength);
-
+    memmove(buffer, data, dataLength);
     for (uint8_t k = 31; k >= 0 && k != 0xFF; k--) {
         for (uint32_t i = dataLength - 8; i >= 0 && i != 0xFFFFFFFF; i--) {
             buffer[i + 7] ^= leftRotate8(key[k], 6 + buffer[i + 6] % 2);
@@ -150,8 +158,8 @@ uint8_t* decrypt(uint32_t& handshake, const uint8_t* data, uint32_t dataLength, 
             buffer[i + 7] = b4 >> 24 & 0xFF;
         }
     }
-
     uint8_t* decrypted = deframe(buffer, dataLength, decryptedLength, handshake);
+
     delete[] buffer;
     return decrypted;
 }
