@@ -41,7 +41,7 @@ uint8_t* frame(uint32_t handshake, const uint8_t* data, uint32_t length, uint32_
     framedLength = sizeLength + handshakeLength + paddingLength + length;
     uint8_t* framed = new uint8_t[framedLength];
     esp_fill_random(framed+sizeLength, paddingLength);
-    *((uint32_t*)framed) = length+4;
+    *((uint32_t*)framed) = length+handshakeLength;
     memmove(framed+sizeLength+paddingLength, &handshake, handshakeLength);
     if (data && length) memmove(framed+sizeLength+paddingLength+handshakeLength, data, length);
     return framed;
