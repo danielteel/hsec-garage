@@ -64,12 +64,16 @@ void setup(){
     }
 }
 
-void onPacket(uint8_t type, uint8_t* data, uint32_t dataLength){
-    if (type==3){
+void onPacket(uint8_t* data, uint32_t dataLength){
+    if (data[0]==3){
         Serial.println("recieved garage door press command");
         digitalWrite(14, HIGH);
         delay(250);
         digitalWrite(14, LOW);
+    }else if (data[0]==1 && dataLength>1){
+        //cameraSetBrightness((int8_t)data[1]);
+    }else if (data[0]==2 && dataLength>1){
+       // cameraSetContrast((int8_t)data[1]);
     }
 }
 
@@ -120,6 +124,18 @@ uint32_t packetPayloadWriteIndex = 0;
 bool haveRecievedServerHandshakeNumber=false;
 
 
+void resetPacketStatus(){
+    if (packetPayload){
+        delete[] packetPayload;
+        packetPayload=nullptr;
+    }
+    packetState=PACKETWRITESTATE::MAGIC1;
+    packetLength=0;
+    packetPayloadWriteIndex=0;
+    haveRecievedServerHandshakeNumber=false;
+    serverHandshakeNumber=0;
+}
+
 void onError(const char* errorMsg){
     if (errorMsg){
         Serial.print("Error: ");
@@ -128,16 +144,6 @@ void onError(const char* errorMsg){
         Serial.println("Error occured");
     }
     Messaging.stop();
-    if (packetPayload){
-        delete[] packetPayload;
-        packetPayload=nullptr;
-    }
-    packetState=PACKETWRITESTATE::MAGIC1;
-    packetType=0;
-    packetLength=0;
-    packetPayloadWriteIndex=0;
-    haveRecievedServerHandshakeNumber=false;
-    serverHandshakeNumber=0;
 }
 
 void dataRecieved(uint8_t byte){
@@ -179,38 +185,37 @@ void dataRecieved(uint8_t byte){
             packetPayloadWriteIndex=0;
             break;
         case PACKETWRITESTATE::PAYLOAD:
-
             packetPayload[packetPayloadWriteIndex]=byte;
-
             packetPayloadWriteIndex++;
-
             if (packetPayloadWriteIndex>=packetLength){
                 uint32_t decryptedLength;
                 uint32_t recvdServerHandshakeNumber;
                 uint8_t* decrypted = decrypt(recvdServerHandshakeNumber, packetPayload, packetLength, decryptedLength, keyString);
                 delete[] packetPayload;
                 packetPayload=nullptr;
-                if (decrypted){
+
+                if (!decrypted){
                     if (!haveRecievedServerHandshakeNumber){
                         serverHandshakeNumber=recvdServerHandshakeNumber;
                         haveRecievedServerHandshakeNumber=true;
+                    }else{
+                        onError("already recieved handshake number");
                     }
-
+                }else{
                     //Send off decrypted packet for processing
                     if (recvdServerHandshakeNumber==serverHandshakeNumber){
                         serverHandshakeNumber++;
-                        onPacket(packetType, decrypted, decryptedLength);
+                        onPacket(decrypted, decryptedLength);
                     }else{
                         onError("incorrect handshake number recieved");
                         Serial.printf("Recvd: %u  Expected: %u\n", recvdServerHandshakeNumber, serverHandshakeNumber);
                         delete[] decrypted;
                         return;
                     }
-                    
                     delete[] decrypted;
-                }else{
-                    Serial.println("failed to decrypt packet");
                 }
+                
+
                 packetState=PACKETWRITESTATE::MAGIC1;
             }
             break;
@@ -225,10 +230,7 @@ void loop(){
 
     if (!Messaging.connected() && ((currentTime-lastConnectAttemptTime)>=2000 || currentTime<lastConnectAttemptTime)){ 
         lastConnectAttemptTime=currentTime;
-        if (packetPayload){
-            delete[] packetPayload;
-            packetPayload=nullptr;
-        }
+        resetPacketStatus();
         if (Messaging.connect("192.168.50.178", 4004)){
             sendInitialHandshake();
             sendPacket("Garage", 6);
@@ -240,8 +242,9 @@ void loop(){
             dataRecieved(message);
         }
 
-        if ((currentTime-lastCaptureTime)>=2000 || currentTime<lastCaptureTime){
+        if ((currentTime-lastCaptureTime)>=1 || currentTime<lastCaptureTime){
             CAMERA_CAPTURE capture;
+
             if (cameraCapture(capture)){
                 if (Messaging.connected()) sendPacket(capture.jpgBuff, capture.jpgBuffLen);
                 cameraCaptureCleanup(capture);

@@ -23,13 +23,12 @@ void initConfig(camera_config_t& c){
     c.pin_sccb_scl = SIOC_GPIO_NUM;
     c.pin_pwdn = PWDN_GPIO_NUM;
     c.pin_reset = RESET_GPIO_NUM;
-    c.xclk_freq_hz = 20000000;
-    c.frame_size = FRAMESIZE_VGA;//FRAMESIZE_HD;
+    c.xclk_freq_hz = 16500000;
+    c.frame_size = FRAMESIZE_HVGA;//FRAMESIZE_VGA;
     c.pixel_format = PIXFORMAT_JPEG; // for streaming
-    //c.pixel_format = PIXFORMAT_RGB565; // for face detection/recognition
     c.grab_mode = CAMERA_GRAB_WHEN_EMPTY;
     c.fb_location = CAMERA_FB_IN_PSRAM;
-    c.jpeg_quality = 10;
+    c.jpeg_quality = 8;
     c.fb_count = 1;
 }
 
@@ -47,7 +46,6 @@ void cameraSetup(){
     s->set_brightness(s, 1);   //up the brightness just a bit
     s->set_saturation(s, -1);  //lower the saturation
 }
-
 
 bool cameraCapture(CAMERA_CAPTURE& cap){
     cap.jpgBuff=NULL;

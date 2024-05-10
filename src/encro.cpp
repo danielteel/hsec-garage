@@ -50,7 +50,6 @@ uint8_t* frame(uint32_t handshake, const uint8_t* data, uint32_t length, uint32_
 uint8_t* deframe(const uint8_t* data, uint32_t framedLength, uint32_t& dataLength, uint32_t& handshake) {
     dataLength = (*((uint32_t*)data))-4;
     if (dataLength>=framedLength){
-        //Serial.println("Bad data length");
         return nullptr;
     }
     handshake=*((uint32_t*)(data+(framedLength - dataLength)-4));
