@@ -183,6 +183,11 @@ void dataRecieved(uint8_t byte){
                 delete[] packetPayload;
                 packetPayload=nullptr;
             }
+            if (packetLength>0x0FFFFF){
+                onError("packet length > 0x0FFFFF");
+                return;
+            }
+            Serial.printf("Recvd Len: %u\n", packetLength);
             packetPayload=new uint8_t[packetLength];//need to clean this up on an error
             packetState=PACKETWRITESTATE::PAYLOAD;
             packetPayloadWriteIndex=0;
