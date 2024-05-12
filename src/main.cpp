@@ -44,14 +44,17 @@ void setup(){
     if (encrypted){
         uint32_t decryptedHandshake;
         uint32_t decryptedLength;
-        uint8_t* decrypted=decrypt(decryptedHandshake, encrypted, encryptedLength, decryptedLength, keyString);
+        bool errorOccured=false;
+        uint8_t* decrypted=decrypt(decryptedHandshake, encrypted, encryptedLength, decryptedLength, keyString, errorOccured);
         delete[] encrypted;
         
-        if (decryptedHandshake==handshakeNumber && decryptedLength==0){
-            Serial.println("Everything looks good");
+        if (errorOccured){
+            Serial.println("error occured decrypting");
+        }else if (decryptedHandshake==handshakeNumber && decryptedLength==0){
+            Serial.println("everything looks good");
         }else{
             if (decryptedHandshake!=handshakeNumber){
-                Serial.println("Handshakes bad");
+                Serial.println("handshakes bad");
             }
             if (decryptedLength!=0){
                 Serial.println("decrypted length bad");
@@ -190,11 +193,13 @@ void dataRecieved(uint8_t byte){
             if (packetPayloadWriteIndex>=packetLength){
                 uint32_t decryptedLength;
                 uint32_t recvdServerHandshakeNumber;
-                uint8_t* decrypted = decrypt(recvdServerHandshakeNumber, packetPayload, packetLength, decryptedLength, keyString);
+                bool errorOccured = false;
+                uint8_t* decrypted = decrypt(recvdServerHandshakeNumber, packetPayload, packetLength, decryptedLength, keyString, errorOccured);
                 delete[] packetPayload;
                 packetPayload=nullptr;
-
-                if (!decrypted){
+                if (errorOccured){
+                    onError("failed to decrypt");
+                }else if (!decrypted){
                     if (!haveRecievedServerHandshakeNumber){
                         serverHandshakeNumber=recvdServerHandshakeNumber;
                         haveRecievedServerHandshakeNumber=true;

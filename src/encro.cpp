@@ -31,6 +31,9 @@ uint8_t* frame(uint32_t handshake, const uint8_t* data, uint32_t length, uint32_
     if (!data && length){
         return nullptr;
     }
+    if (length>0XFFFF0){
+        return nullptr;
+    }
     uint8_t paddingLength = 4;
     const uint8_t handshakeLength=4;
     const uint8_t sizeLength=4;
@@ -47,9 +50,11 @@ uint8_t* frame(uint32_t handshake, const uint8_t* data, uint32_t length, uint32_
     return framed;
 }
 
-uint8_t* deframe(const uint8_t* data, uint32_t framedLength, uint32_t& dataLength, uint32_t& handshake) {
+uint8_t* deframe(const uint8_t* data, uint32_t framedLength, uint32_t& dataLength, uint32_t& handshake, bool& error) {
+    error=false;
     dataLength = (*((uint32_t*)data))-4;
-    if (dataLength>=framedLength){
+    if (dataLength>framedLength-4 || dataLength>0x0FFFF0){
+        error=true;
         return nullptr;
     }
     handshake=*((uint32_t*)(data+(framedLength - dataLength)-4));
@@ -63,10 +68,10 @@ uint8_t* deframe(const uint8_t* data, uint32_t framedLength, uint32_t& dataLengt
 
 
 uint8_t* encrypt(uint32_t handshake, const uint8_t* data, uint32_t dataLength, uint32_t& encryptedLength, const char* keyString) {
-    if (dataLength>0xFFFFFF00){
+    uint8_t* buffer = frame(handshake, data, dataLength, encryptedLength);
+    if (!buffer){
         return nullptr;
     }
-    uint8_t* buffer = frame(handshake, data, dataLength, encryptedLength);
 
     uint8_t key[32];
     char tempHex[] = { 0,0,0 };
@@ -114,7 +119,8 @@ uint8_t* encrypt(uint32_t handshake, const uint8_t* data, uint32_t dataLength, u
 }
 
 
-uint8_t* decrypt(uint32_t& handshake, const uint8_t* data, uint32_t dataLength, uint32_t& decryptedLength, const char* keyString) {
+uint8_t* decrypt(uint32_t& handshake, const uint8_t* data, uint32_t dataLength, uint32_t& decryptedLength, const char* keyString, bool& error) {
+    error=false;
     uint8_t key[32];
     char tempHex[] = { 0,0,0 };
     for (uint8_t i = 0; i < 64; i += 2) {
@@ -157,7 +163,7 @@ uint8_t* decrypt(uint32_t& handshake, const uint8_t* data, uint32_t dataLength, 
             buffer[i + 7] = b4 >> 24 & 0xFF;
         }
     }
-    uint8_t* decrypted = deframe(buffer, dataLength, decryptedLength, handshake);
+    uint8_t* decrypted = deframe(buffer, dataLength, decryptedLength, handshake, error);
 
     delete[] buffer;
     return decrypted;
