@@ -14,6 +14,7 @@ uint32_t handshakeNumber=0;
 uint32_t serverHandshakeNumber=0;
 
 const uint8_t packetMagicBytes[]={73, 31};
+const uint8_t handshakeMagicBytes[]={13, 37};
 
 void setup(){
     Serial.begin(115200);
@@ -82,10 +83,12 @@ void onPacket(uint8_t* data, uint32_t dataLength){
 
 void sendInitialHandshake(){
     uint32_t encryptedLength;
-    const uint8_t handshakeMessage=0;
-    uint8_t* encrypted=encrypt(handshakeNumber, &handshakeMessage, 0, encryptedLength, keyString);
+    const char handshakeMessage[]="operate:void:1,light:byte:2";
+    uint8_t* encrypted=encrypt(handshakeNumber, (uint8_t*)handshakeMessage, strlen(handshakeMessage), encryptedLength, keyString);
     if (encrypted){
-        Messaging.write(packetMagicBytes, 2);
+        Messaging.write(handshakeMagicBytes, 2);
+        Messaging.write((uint8_t) 6);
+        Messaging.write("garage");
         Messaging.write((uint8_t*)&encryptedLength, 4);
         Messaging.write(encrypted, encryptedLength);
         delete[] encrypted;
@@ -224,8 +227,6 @@ void dataRecieved(uint8_t byte){
                     }
                     delete[] decrypted;
                 }
-                
-
                 packetState=PACKETWRITESTATE::MAGIC1;
             }
             break;
@@ -243,7 +244,6 @@ void loop(){
         resetPacketStatus();
         if (Messaging.connect("192.168.50.178", 4004)){
             sendInitialHandshake();
-            sendPacket("Garage", 6);
         }
     }else if (Messaging.connected()){
         while (Messaging.connected() && Messaging.available()){
