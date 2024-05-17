@@ -155,16 +155,31 @@ void onError(const char* errorMsg){
 void dataRecieved(uint8_t byte){
     switch (packetState){
         case PACKETWRITESTATE::MAGIC1:
-            if (byte!=packetMagicBytes[0]){
-                onError("magic1 byte is incorrect");
-                return;
+            if (!haveRecievedServerHandshakeNumber){
+                if (byte!=handshakeMagicBytes[0]){
+                    onError("magic1 initial byte is incorrect");
+                    return;
+                }
+            }else{
+                if (byte!=packetMagicBytes[0]){
+                    onError("magic1 byte is incorrect");
+                    return;
+                } 
             }
+
             packetState=PACKETWRITESTATE::MAGIC2;
             break;
         case PACKETWRITESTATE::MAGIC2:
-            if (byte!=packetMagicBytes[1]){
-                onError("magic2 byte is incorrect");
-                return;
+            if (!haveRecievedServerHandshakeNumber){
+                if (byte!=handshakeMagicBytes[1]){
+                    onError("magic2 initial byte is incorrect");
+                    return;
+                }
+            }else{
+                if (byte!=packetMagicBytes[1]){
+                    onError("magic2 byte is incorrect");
+                    return;
+                } 
             }
             packetState=PACKETWRITESTATE::LEN1;
             break;
@@ -252,7 +267,7 @@ void loop(){
             dataRecieved(message);
         }
 
-        if ((currentTime-lastCaptureTime)>=1 || currentTime<lastCaptureTime){
+        if ((currentTime-lastCaptureTime)>=2000 || currentTime<lastCaptureTime){
             CAMERA_CAPTURE capture;
 
             if (cameraCapture(capture)){
