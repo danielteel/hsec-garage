@@ -2,13 +2,13 @@
 #include <WiFiManager.h>
 #include <WiFi.h>
 #include <Esp.h>
+#include <EEPROM.h>
 #include "camera.h"
 #include "encro.h"
 WiFiManager wifiManager;
 WiFiClient Client;
 WiFiClient Messaging;
 
-const char* keyString = "4c97d02ae05b748dcb67234065ddf4b8f832a17826cf44a4f90a91349da78cba";
 
 uint32_t handshakeNumber=0;
 uint32_t serverHandshakeNumber=0;
@@ -16,79 +16,65 @@ uint32_t serverHandshakeNumber=0;
 const uint8_t packetMagicBytes[]={73, 31};
 const uint8_t handshakeMagicBytes[]={13, 37};
 
+
+char* deviceName = "Garage";
+char* encroKey = "";
+
+
 void setup(){
+    pinMode(14, OUTPUT);
+    digitalWrite(14, LOW);
+    pinMode(15, INPUT_PULLUP);//enter config mode
+    digitalWrite(14, LOW);
+    delay(250);
+
     Serial.begin(115200);
     Serial.println("Initializing...");
 
-    WiFiManagerParameter deviceNameParameter("name", "Device Name", "garage", 31);
-    wifiManager.addParameter(&deviceNameParameter);
+    WiFi.mode(WIFI_STA);
 
-    WiFiManagerParameter hsecIPParameter("hsecIP", "HSEC IP Address", "192.168.1.14", 31);
-    wifiManager.addParameter(&hsecIPParameter);
 
-    wifiManager.setConfigPortalTimeout(60);
+    wifiManager.setConfigPortalTimeout(120);
     wifiManager.setConnectTimeout(60);
-    wifiManager.autoConnect("HSEC Dev Setup", "powerboner69");
+    if ( digitalRead(15) == LOW ) {
+        Serial.println("Entering setup mode...");
+        wifiManager.startConfigPortal("HSEC Garage Setup");
+        ESP.restart();
+    }
+
+    Serial.println("Autoconnecting...");
 
     handshakeNumber=esp_random();
+
+    wifiManager.autoConnect("HSEC Garage Setup");
+
+    Serial.printf("Name %i:%s\n", strlen(deviceName), deviceName);
+    Serial.printf("Encrokey %i:%s\n", strlen(encroKey), encroKey);
+
 
     Serial.println("Auto connect returned...");
     cameraSetup();
     Serial.println("camera setup...");
 
-    delay(500);
-    pinMode(14, OUTPUT);
-    digitalWrite(14, LOW);
-
-    uint32_t encryptedLength;
-    uint8_t* encrypted=encrypt(handshakeNumber, nullptr, 0, encryptedLength, keyString);
-    if (encrypted){
-        uint32_t decryptedHandshake;
-        uint32_t decryptedLength;
-        bool errorOccured=false;
-        uint8_t* decrypted=decrypt(decryptedHandshake, encrypted, encryptedLength, decryptedLength, keyString, errorOccured);
-        delete[] encrypted;
-        
-        if (errorOccured){
-            Serial.println("error occured decrypting");
-        }else if (decryptedHandshake==handshakeNumber && decryptedLength==0){
-            Serial.println("everything looks good");
-        }else{
-            if (decryptedHandshake!=handshakeNumber){
-                Serial.println("handshakes bad");
-            }
-            if (decryptedLength!=0){
-                Serial.println("decrypted length bad");
-            }
-        }
-            
-        if (decrypted) delete[] decrypted;
-    }else{
-        Serial.println("failed to encrypt");
-    }
 }
 
 void onPacket(uint8_t* data, uint32_t dataLength){
-    if (data[0]==3){
+    if (data[0]==1){
         Serial.println("recieved garage door press command");
         digitalWrite(14, HIGH);
         delay(250);
         digitalWrite(14, LOW);
-    }else if (data[0]==1 && dataLength>1){
-        //cameraSetBrightness((int8_t)data[1]);
-    }else if (data[0]==2 && dataLength>1){
-       // cameraSetContrast((int8_t)data[1]);
     }
 }
 
 void sendInitialHandshake(){
     uint32_t encryptedLength;
-    const char handshakeMessage[]="operate:void:1,light:byte:2";
-    uint8_t* encrypted=encrypt(handshakeNumber, (uint8_t*)handshakeMessage, strlen(handshakeMessage), encryptedLength, keyString);
+    const char handshakeMessage[]="operate:void:1";
+    uint8_t* encrypted=encrypt(handshakeNumber, (uint8_t*)handshakeMessage, strlen(handshakeMessage), encryptedLength, encroKey);
     if (encrypted){
         Messaging.write(handshakeMagicBytes, 2);
-        Messaging.write((uint8_t) 6);
-        Messaging.write("garage");
+        Messaging.write((uint8_t) strlen(deviceName));
+        Messaging.write(deviceName);
         Messaging.write((uint8_t*)&encryptedLength, 4);
         Messaging.write(encrypted, encryptedLength);
         delete[] encrypted;
@@ -99,7 +85,7 @@ void sendInitialHandshake(){
 
 void sendPacket(const void* data, uint32_t dataLength){
     uint32_t encryptedLength;
-    uint8_t* encrypted=encrypt(handshakeNumber, (const uint8_t*)data, dataLength, encryptedLength, keyString);
+    uint8_t* encrypted=encrypt(handshakeNumber, (const uint8_t*)data, dataLength, encryptedLength, encroKey);
     if (encrypted){
         Messaging.write(packetMagicBytes, 2);
         Messaging.write((uint8_t*)&encryptedLength, 4);
@@ -217,30 +203,34 @@ void dataRecieved(uint8_t byte){
                 uint32_t decryptedLength;
                 uint32_t recvdServerHandshakeNumber;
                 bool errorOccured = false;
-                uint8_t* decrypted = decrypt(recvdServerHandshakeNumber, packetPayload, packetLength, decryptedLength, keyString, errorOccured);
+                uint8_t* decrypted = decrypt(recvdServerHandshakeNumber, packetPayload, packetLength, decryptedLength, encroKey, errorOccured);
                 delete[] packetPayload;
                 packetPayload=nullptr;
                 if (errorOccured){
                     onError("failed to decrypt");
-                }else if (!decrypted){
+                }else{       
                     if (!haveRecievedServerHandshakeNumber){
                         serverHandshakeNumber=recvdServerHandshakeNumber;
                         haveRecievedServerHandshakeNumber=true;
                     }else{
-                        onError("already recieved handshake number");
+                        //Send off decrypted packet for processing
+                        if (recvdServerHandshakeNumber==serverHandshakeNumber){
+                            serverHandshakeNumber++;
+                            onPacket(decrypted, decryptedLength);
+                        }else{
+                            onError("incorrect handshake number recieved");
+                            Serial.printf("Recvd: %u  Expected: %u\n", recvdServerHandshakeNumber, serverHandshakeNumber);
+                            if (decrypted){
+                                delete[] decrypted;
+                                decrypted=nullptr;
+                            }
+                            return;
+                        }
                     }
-                }else{
-                    //Send off decrypted packet for processing
-                    if (recvdServerHandshakeNumber==serverHandshakeNumber){
-                        serverHandshakeNumber++;
-                        onPacket(decrypted, decryptedLength);
-                    }else{
-                        onError("incorrect handshake number recieved");
-                        Serial.printf("Recvd: %u  Expected: %u\n", recvdServerHandshakeNumber, serverHandshakeNumber);
+                    if (decrypted){
                         delete[] decrypted;
-                        return;
+                        decrypted=nullptr;
                     }
-                    delete[] decrypted;
                 }
                 packetState=PACKETWRITESTATE::MAGIC1;
             }
@@ -257,7 +247,7 @@ void loop(){
     if (!Messaging.connected() && ((currentTime-lastConnectAttemptTime)>=2000 || currentTime<lastConnectAttemptTime)){ 
         lastConnectAttemptTime=currentTime;
         resetPacketStatus();
-        if (Messaging.connect("192.168.50.178", 4004)){
+        if (Messaging.connect("danteel.dedyn.io", 4004)){
             sendInitialHandshake();
         }
     }else if (Messaging.connected()){
@@ -267,7 +257,7 @@ void loop(){
             dataRecieved(message);
         }
 
-        if ((currentTime-lastCaptureTime)>=2000 || currentTime<lastCaptureTime){
+        if ((currentTime-lastCaptureTime)>=1250 || currentTime<lastCaptureTime){
             CAMERA_CAPTURE capture;
 
             if (cameraCapture(capture)){
